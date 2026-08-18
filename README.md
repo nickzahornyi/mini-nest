@@ -11,8 +11,9 @@ npm ci
 npm test
 ```
 
-Тести перевіряють рекурсивний граф `A -> B -> C`, singleton, transient,
-`@Inject(Symbol)` і зрозумілу помилку для циклу `A -> B -> A`.
+Сім тестів перевіряють рекурсивний граф `A -> B -> C`, singleton, спільний
+singleton для class token та alias, transient, `@Inject(Symbol)`, успадкування
+inject-метаданих і зрозумілу помилку для циклу `A -> B -> A`.
 
 Запуск тестів у Docker-образі з ДЗ #5:
 

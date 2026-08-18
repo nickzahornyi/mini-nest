@@ -14,11 +14,10 @@ type Provider<T> = Constructor<T> | ClassProvider<T> | ValueProvider<T>;
 
 export class Container {
   private readonly providers = new Map<InjectionToken, Provider<unknown>>();
-  private readonly singletons = new Map<InjectionToken, unknown>();
+  private readonly singletons = new Map<Constructor, unknown>();
 
   register<T>(token: InjectionToken<T>, provider: Provider<T>): this {
     this.providers.set(token, provider as Provider<unknown>);
-    this.singletons.delete(token);
     return this;
   }
 
@@ -35,21 +34,21 @@ export class Container {
   }
 
   private resolveToken<T>(token: InjectionToken<T>, path: Constructor[]): T {
-    if (this.singletons.has(token)) {
-      return this.singletons.get(token) as T;
-    }
-
     const provider = this.providers.get(token) ?? token;
     if (this.isValueProvider(provider)) {
       return provider.useValue as T;
     }
 
     const target = this.getTarget(provider, token);
-    const instance = this.instantiate(target, path);
     const scope = Reflect.getMetadata(SCOPE_METADATA, target) as Scope | undefined;
+    if ((scope ?? "singleton") === "singleton" && this.singletons.has(target)) {
+      return this.singletons.get(target) as T;
+    }
+
+    const instance = this.instantiate(target, path);
 
     if ((scope ?? "singleton") === "singleton") {
-      this.singletons.set(token, instance);
+      this.singletons.set(target, instance);
     }
 
     return instance as T;
@@ -70,7 +69,7 @@ export class Container {
     const parameterTypes =
       (Reflect.getMetadata("design:paramtypes", target) as InjectionToken[]) ?? [];
     const injectedTokens =
-      (Reflect.getOwnMetadata(INJECT_TOKENS_METADATA, target) as
+      (Reflect.getMetadata(INJECT_TOKENS_METADATA, target) as
         | Map<number, InjectionToken>
         | undefined) ?? new Map();
     const nextPath = [...path, target];
