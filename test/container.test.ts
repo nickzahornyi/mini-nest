@@ -36,6 +36,15 @@ describe("Container", () => {
     assert.equal(container.resolve(Service), container.resolve(Service));
   });
 
+  it("shares a singleton between a class token and its alias", () => {
+    @Injectable()
+    class Service {}
+
+    const container = new Container().registerClass("service", Service);
+
+    assert.equal(container.resolve("service"), container.resolve(Service));
+  });
+
   it("returns a new transient instance for every resolve", () => {
     @Injectable({ scope: "transient" })
     class Service {}
@@ -60,22 +69,44 @@ describe("Container", () => {
     assert.equal(container.resolve(UsesConfig).config, config);
   });
 
+  it("inherits @Inject metadata with a base constructor", () => {
+    interface AppConfig {
+      environment: string;
+    }
+
+    @Injectable()
+    class BaseService {
+      constructor(@Inject(CONFIG) readonly config: AppConfig) {}
+    }
+
+    class ChildService extends BaseService {}
+
+    const config = { environment: "inherited" };
+    const container = new Container().registerValue(CONFIG, config);
+
+    assert.equal(container.resolve(ChildService).config, config);
+  });
+
   it("reports the complete circular dependency chain", () => {
+    const TOKEN_A = Symbol("A");
+    const TOKEN_B = Symbol("B");
+
     @Injectable()
     class A {
-      constructor(readonly b: unknown) {}
+      constructor(@Inject(TOKEN_B) readonly b: unknown) {}
     }
 
     @Injectable()
     class B {
-      constructor(readonly a: unknown) {}
+      constructor(@Inject(TOKEN_A) readonly a: unknown) {}
     }
 
-    Reflect.defineMetadata("design:paramtypes", [B], A);
-    Reflect.defineMetadata("design:paramtypes", [A], B);
+    const container = new Container()
+      .registerClass(TOKEN_A, A)
+      .registerClass(TOKEN_B, B);
 
     assert.throws(
-      () => new Container().resolve(A),
+      () => container.resolve(TOKEN_A),
       (error: unknown) =>
         error instanceof Error &&
         !(error instanceof RangeError) &&
