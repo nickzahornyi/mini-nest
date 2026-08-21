@@ -30,7 +30,7 @@ export class UsersController {
   }
 
   @Post()
-  create(@Body() body: CreateUserDto) {
+  create(@Body(CreateUserDto) body: CreateUserDto) {
     return this.users.create(body);
   }
 }

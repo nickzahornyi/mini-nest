@@ -13,11 +13,30 @@ import {
   ValidationPipe,
 } from "./pipes/validation.pipe.js";
 
+export interface HandlerContext {
+  controller: Record<string, (...values: unknown[]) => unknown>;
+  handler: (...values: unknown[]) => unknown;
+  args: unknown[];
+  request: IncomingMessage;
+  match: RouteMatch;
+}
+
+export type ExecutionStage = (
+  context: HandlerContext,
+  next: () => Promise<unknown>,
+) => Promise<unknown>;
+
 export class Dispatcher {
   constructor(
     private readonly router: Router,
     private readonly validationPipe = new ValidationPipe(),
+    private readonly stages: ExecutionStage[] = [],
   ) {}
+
+  use(stage: ExecutionStage): this {
+    this.stages.push(stage);
+    return this;
+  }
 
   createServer(): Server {
     return createServer((request, response) => {
@@ -39,7 +58,13 @@ export class Dispatcher {
       const controller = this.router.container.resolve(match.route.controller) as
         Record<string, (...values: unknown[]) => unknown>;
       const handler = controller[match.route.handlerName];
-      const result = await handler.apply(controller, args);
+      const result = await this.executeHandler({
+        controller,
+        handler,
+        args,
+        request,
+        match,
+      });
       this.json(response, match.route.method === "POST" ? 201 : 200, result);
     } catch (error) {
       if (error instanceof ValidationException) {
@@ -79,13 +104,23 @@ export class Dispatcher {
         args[index] = url.searchParams.get(parameter.name) ?? undefined;
       }
       if (parameter.type === "body") {
-        const dto = parameterTypes[index];
+        const dto = parameter.dto ?? parameterTypes[index];
         args[index] = dto && dto !== Object
           ? this.validationPipe.transform(body, dto as Constructor<object>)
           : body;
       }
     }
     return args;
+  }
+
+  private executeHandler(context: HandlerContext): Promise<unknown> {
+    const invoke = () =>
+      Promise.resolve(context.handler.apply(context.controller, context.args));
+    const pipeline = this.stages.reduceRight<() => Promise<unknown>>(
+      (next, stage) => () => stage(context, next),
+      invoke,
+    );
+    return pipeline();
   }
 
   private async readJsonBody(request: IncomingMessage): Promise<unknown> {

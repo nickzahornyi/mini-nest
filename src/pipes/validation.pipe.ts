@@ -46,13 +46,15 @@ export const IsString = (): PropertyDecorator =>
 export class ValidationPipe {
   transform<T extends object>(value: unknown, dto: Constructor<T>): T {
     const instance = Object.create(dto.prototype) as T;
-    if (typeof value === "object" && value !== null) {
-      Object.assign(instance, value);
-    }
     const rules: ValidationRules =
       (Reflect.getMetadata(VALIDATION_RULES_METADATA, dto) as
         | ValidationRules
         | undefined) ?? new Map<string, ValidationRule[]>();
+    if (typeof value === "object" && value !== null) {
+      const source = value as Record<string, unknown>;
+      const target = instance as unknown as Record<string, unknown>;
+      for (const field of rules.keys()) target[field] = source[field];
+    }
     const errors: ValidationErrorDetail[] = [];
 
     for (const [field, validators] of rules) {

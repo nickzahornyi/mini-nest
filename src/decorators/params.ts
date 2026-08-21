@@ -1,8 +1,8 @@
 import "reflect-metadata";
-import { ROUTE_PARAMS_METADATA } from "../tokens.js";
+import { ROUTE_PARAMS_METADATA, type Constructor } from "../tokens.js";
 
 export type RouteParamMetadata =
-  | { type: "body" }
+  | { type: "body"; dto?: Constructor<object> }
   | { type: "param"; name: string }
   | { type: "query"; name: string };
 
@@ -25,7 +25,8 @@ function routeParam(metadata: RouteParamMetadata): ParameterDecorator {
   };
 }
 
-export const Body = (): ParameterDecorator => routeParam({ type: "body" });
+export const Body = (dto?: Constructor<object>): ParameterDecorator =>
+  routeParam({ type: "body", dto });
 export const Param = (name: string): ParameterDecorator =>
   routeParam({ type: "param", name });
 export const Query = (name: string): ParameterDecorator =>
