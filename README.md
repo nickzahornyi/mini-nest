@@ -11,7 +11,7 @@ npm ci
 npm test
 ```
 
-Тринадцять тестів перевіряють IoC-контейнер, маршрути, `@Param`, `@Query`,
+Шістнадцять тестів перевіряють IoC-контейнер, маршрути, `@Param`, `@Query`,
 `@Body`, DTO validation, HTTP 400/404 та створення controller dependencies
 саме контейнером.
 
@@ -63,19 +63,23 @@ TypeScript викликає параметр-декоратор із `target`, `
 після чого викликає handler через `method.apply(controller, args)`. Для
 `@Body()` він додатково читає `design:paramtypes`, створює екземпляр відповідного
 DTO та передає його у validation pipe; тому handler отримує не plain object, а
-екземпляр `CreateUserDto`.
+екземпляр `CreateUserDto`. Якщо TypeScript-тип стертий до `any`/`Object`, DTO
+можна задати явно: `@Body(CreateUserDto)`.
 
 ## HTTP routing і DTO
 
 `@Controller(prefix)` зберігає базовий шлях класу, а `@Get(path)` і
 `@Post(path)` — HTTP-метод та локальний шлях handler-а. `Router` склеює їх,
 компілює сегменти на кшталт `:id` і під час запиту повертає знайдений route із
-path parameters. Список URL у коді не підтримується вручну: джерелом маршрутів
-є metadata декораторів.
+path parameters. Статичні сегменти сортуються перед динамічними, тому
+`/users/special` не перехоплюється маршрутом `/users/:id`. Список URL у коді не
+підтримується вручну: джерелом маршрутів є metadata декораторів.
 
 Власні `@IsString()` та `@IsEmail()` записують правила DTO. `ValidationPipe`
-перетворює JSON body на екземпляр класу, збирає помилки всіх полів і повертає їх
-як `[{ field, constraints }]` з HTTP 400.
+перетворює JSON body на екземпляр класу, копіює лише поля з validation rules,
+збирає помилки всіх полів і повертає їх як `[{ field, constraints }]` з HTTP
+400. Виклик handler-а винесений у composable execution pipeline — наступна
+частина зможе додати guards та interceptors через `dispatcher.use(stage)`.
 
 ## Docker
 

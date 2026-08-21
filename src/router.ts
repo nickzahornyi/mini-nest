@@ -75,7 +75,25 @@ export class Router {
         pattern,
         parameterNames,
       });
+      this.routes.sort((left, right) => this.compareSpecificity(left, right));
     }
+  }
+
+  private compareSpecificity(
+    left: RegisteredRoute,
+    right: RegisteredRoute,
+  ): number {
+    const leftSegments = left.path.split("/").filter(Boolean);
+    const rightSegments = right.path.split("/").filter(Boolean);
+    const length = Math.min(leftSegments.length, rightSegments.length);
+
+    for (let index = 0; index < length; index += 1) {
+      const leftDynamic = leftSegments[index].startsWith(":");
+      const rightDynamic = rightSegments[index].startsWith(":");
+      if (leftDynamic !== rightDynamic) return leftDynamic ? 1 : -1;
+    }
+
+    return rightSegments.length - leftSegments.length;
   }
 
   private joinPaths(prefix: string, path: string): string {
