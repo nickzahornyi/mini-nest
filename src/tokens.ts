@@ -5,5 +5,9 @@ export type Scope = "singleton" | "transient";
 export const INJECTABLE_METADATA = Symbol("mini-nest:injectable");
 export const SCOPE_METADATA = Symbol("mini-nest:scope");
 export const INJECT_TOKENS_METADATA = Symbol("mini-nest:inject-tokens");
+export const CONTROLLER_PREFIX_METADATA = Symbol("mini-nest:controller-prefix");
+export const ROUTE_METADATA = Symbol("mini-nest:route");
+export const ROUTE_PARAMS_METADATA = Symbol("mini-nest:route-params");
+export const VALIDATION_RULES_METADATA = Symbol("mini-nest:validation-rules");
 
 export const CONFIG = Symbol.for("CONFIG");

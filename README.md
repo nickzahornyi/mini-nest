@@ -1,8 +1,8 @@
-# mini-nest — Part 1: IoC container
+# mini-nest — Part 2: HTTP routing and validation
 
-Навчальна реалізація IoC-контейнера з constructor injection, токенами,
-singleton/transient scopes і детекцією циклічних залежностей. Сторонні
-DI-контейнери не використовуються.
+Навчальна реалізація mini-Nest без HTTP-фреймворків: IoC-контейнер із першої
+частини створює контролери та сервіси, router читає декоратори маршрутів, а
+dispatcher обслуговує запити через `node:http` і валідує DTO.
 
 ## Запуск і тести
 
@@ -11,9 +11,9 @@ npm ci
 npm test
 ```
 
-Сім тестів перевіряють рекурсивний граф `A -> B -> C`, singleton, спільний
-singleton для class token та alias, transient, `@Inject(Symbol)`, успадкування
-inject-метаданих і зрозумілу помилку для циклу `A -> B -> A`.
+Тринадцять тестів перевіряють IoC-контейнер, маршрути, `@Param`, `@Query`,
+`@Body`, DTO validation, HTTP 400/404 та створення controller dependencies
+саме контейнером.
 
 Запуск тестів у Docker-образі з ДЗ #5:
 
@@ -28,6 +28,11 @@ API та PostgreSQL, як і раніше, запускаються однією
 docker compose up -d --build
 curl http://localhost:3000/health
 curl http://localhost:3000/users
+curl http://localhost:3000/users/42
+curl 'http://localhost:3000/users?limit=1'
+curl -X POST http://localhost:3000/users \
+  -H 'content-type: application/json' \
+  -d '{"name":"Lin","email":"lin@example.com"}'
 ```
 
 Налаштування беруться з `.env`; безпечний шаблон для нового середовища лежить
@@ -48,6 +53,29 @@ curl http://localhost:3000/users
 екземпляру контейнера; transient provider щоразу створюється заново. Під час
 рекурсії контейнер також веде поточний шлях класів і повідомляє повний ланцюг,
 якщо клас зустрічається повторно.
+
+## Як параметр-декоратор знає, куди підставити значення
+
+TypeScript викликає параметр-декоратор із `target`, `propertyKey` та
+`parameterIndex`. `@Body()`, `@Param(name)` і `@Query(name)` записують у metadata
+методу мапу `parameterIndex -> source`. Під час HTTP-запиту dispatcher читає цю
+мапу, створює масив аргументів і кладе кожне значення саме за його індексом,
+після чого викликає handler через `method.apply(controller, args)`. Для
+`@Body()` він додатково читає `design:paramtypes`, створює екземпляр відповідного
+DTO та передає його у validation pipe; тому handler отримує не plain object, а
+екземпляр `CreateUserDto`.
+
+## HTTP routing і DTO
+
+`@Controller(prefix)` зберігає базовий шлях класу, а `@Get(path)` і
+`@Post(path)` — HTTP-метод та локальний шлях handler-а. `Router` склеює їх,
+компілює сегменти на кшталт `:id` і під час запиту повертає знайдений route із
+path parameters. Список URL у коді не підтримується вручну: джерелом маршрутів
+є metadata декораторів.
+
+Власні `@IsString()` та `@IsEmail()` записують правила DTO. `ValidationPipe`
+перетворює JSON body на екземпляр класу, збирає помилки всіх полів і повертає їх
+як `[{ field, constraints }]` з HTTP 400.
 
 ## Docker
 
