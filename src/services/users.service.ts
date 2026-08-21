@@ -1,8 +1,6 @@
-import pg from "pg";
 import { Injectable } from "../decorators/injectable.js";
 import type { CreateUserDto } from "../dto/create-user.dto.js";
-
-const { Pool } = pg;
+import { UserRepository } from "./user.repository.js";
 
 export interface UserRecord {
   id: number;
@@ -12,10 +10,10 @@ export interface UserRecord {
 
 @Injectable()
 export class UsersService {
-  private readonly pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  constructor(private readonly repository: UserRepository) {}
 
   async health(): Promise<void> {
-    await this.pool.query("SELECT 1");
+    await this.repository.health();
   }
 
   async findAll(limit?: string): Promise<UserRecord[]> {
@@ -23,30 +21,18 @@ export class UsersService {
     const safeLimit = Number.isFinite(parsedLimit)
       ? Math.min(Math.max(parsedLimit, 1), 100)
       : 100;
-    const result = await this.pool.query<UserRecord>(
-      "SELECT id, name, email FROM users ORDER BY id LIMIT $1",
-      [safeLimit],
-    );
-    return result.rows;
+    return this.repository.findAll(safeLimit);
   }
 
   async findOne(id: string): Promise<UserRecord | undefined> {
-    const result = await this.pool.query<UserRecord>(
-      "SELECT id, name, email FROM users WHERE id = $1",
-      [id],
-    );
-    return result.rows[0];
+    return this.repository.findOne(id);
   }
 
   async create(dto: CreateUserDto): Promise<UserRecord> {
-    const result = await this.pool.query<UserRecord>(
-      "INSERT INTO users (name, email) VALUES ($1, $2) RETURNING id, name, email",
-      [dto.name, dto.email],
-    );
-    return result.rows[0];
+    return this.repository.create(dto);
   }
 
   async close(): Promise<void> {
-    await this.pool.end();
+    await this.repository.close();
   }
 }

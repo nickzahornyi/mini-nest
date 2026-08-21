@@ -8,12 +8,12 @@ export { Get, Post } from "./decorators/methods.js";
 export { Body, Param, Query } from "./decorators/params.js";
 export { Dispatcher } from "./dispatcher.js";
 export { Router } from "./router.js";
-export {
-  IsEmail,
-  IsString,
-  ValidationException,
-  ValidationPipe,
-} from "./pipes/validation.pipe.js";
+export { AuthGuard } from "./guards/auth.guard.js";
+export { LoggingInterceptor } from "./interceptors/logging.interceptor.js";
+export { ExceptionFilter } from "./filters/exception.filter.js";
+export { RequestContext } from "./context/request-context.js";
+export { ZodValidationPipe } from "./pipes/zod-validation.pipe.js";
+export { ForbiddenError, NotFoundError, ValidationError } from "./errors.js";
 export { CONFIG } from "./tokens.js";
 export type {
   Constructor,

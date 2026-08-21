@@ -5,6 +5,8 @@ import {
   UsersController,
 } from "./controllers/app.controller.js";
 import { Dispatcher } from "./dispatcher.js";
+import { AuthGuard } from "./guards/auth.guard.js";
+import { LoggingInterceptor } from "./interceptors/logging.interceptor.js";
 import { Router } from "./router.js";
 import { UsersService } from "./services/users.service.js";
 
@@ -14,7 +16,10 @@ const router = new Router(container).registerControllers([
   HealthController,
   UsersController,
 ]);
-const server = new Dispatcher(router).createServer();
+const dispatcher = new Dispatcher(router)
+  .useGuard(new AuthGuard(["/health"]))
+  .useInterceptor(new LoggingInterceptor());
+const server = dispatcher.createServer();
 
 server.listen(port, "0.0.0.0", () => {
   console.log(`API listening on port ${port}`);

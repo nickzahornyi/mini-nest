@@ -1,40 +1,61 @@
 import "reflect-metadata";
+import { randomUUID } from "node:crypto";
 import {
   createServer,
   type IncomingMessage,
   type Server,
   type ServerResponse,
 } from "node:http";
+import { RequestContext } from "./context/request-context.js";
 import type { RouteParamMetadata } from "./decorators/params.js";
+import { ForbiddenError, NotFoundError } from "./errors.js";
+import { ExceptionFilter } from "./filters/exception.filter.js";
+import { ZodValidationPipe } from "./pipes/zod-validation.pipe.js";
 import { Router, type RouteMatch } from "./router.js";
 import { ROUTE_PARAMS_METADATA, type Constructor } from "./tokens.js";
-import {
-  ValidationException,
-  ValidationPipe,
-} from "./pipes/validation.pipe.js";
 
-export interface HandlerContext {
-  controller: Record<string, (...values: unknown[]) => unknown>;
-  handler: (...values: unknown[]) => unknown;
-  args: unknown[];
-  request: IncomingMessage;
-  match: RouteMatch;
+export interface Middleware {
+  use(
+    request: IncomingMessage,
+    response: ServerResponse,
+    next: () => Promise<void>,
+  ): Promise<void>;
 }
 
-export type ExecutionStage = (
-  context: HandlerContext,
-  next: () => Promise<unknown>,
-) => Promise<unknown>;
+export interface Guard {
+  canActivate(request: IncomingMessage): boolean | Promise<boolean>;
+}
+
+export interface Interceptor {
+  intercept(
+    request: IncomingMessage,
+    next: () => Promise<unknown>,
+  ): Promise<unknown>;
+}
 
 export class Dispatcher {
+  private readonly middlewares: Middleware[] = [];
+  private readonly guards: Guard[] = [];
+  private readonly interceptors: Interceptor[] = [];
+
   constructor(
     private readonly router: Router,
-    private readonly validationPipe = new ValidationPipe(),
-    private readonly stages: ExecutionStage[] = [],
+    private readonly validationPipe = new ZodValidationPipe(),
+    private readonly exceptionFilter = new ExceptionFilter(),
   ) {}
 
-  use(stage: ExecutionStage): this {
-    this.stages.push(stage);
+  useMiddleware(middleware: Middleware): this {
+    this.middlewares.push(middleware);
+    return this;
+  }
+
+  useGuard(guard: Guard): this {
+    this.guards.push(guard);
+    return this;
+  }
+
+  useInterceptor(interceptor: Interceptor): this {
+    this.interceptors.push(interceptor);
     return this;
   }
 
@@ -48,34 +69,66 @@ export class Dispatcher {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> {
-    try {
-      const url = new URL(request.url ?? "/", "http://localhost");
-      const match = this.router.match(request.method ?? "GET", url.pathname);
-      if (!match) return this.json(response, 404, { error: "Not found" });
+    const requestIdHeader = request.headers["x-request-id"];
+    const requestId =
+      (Array.isArray(requestIdHeader) ? requestIdHeader[0] : requestIdHeader) ??
+      randomUUID();
+    response.setHeader("X-Request-Id", requestId);
 
-      const body = await this.readJsonBody(request);
-      const args = this.buildArguments(match, url, body);
-      const controller = this.router.container.resolve(match.route.controller) as
-        Record<string, (...values: unknown[]) => unknown>;
-      const handler = controller[match.route.handlerName];
-      const result = await this.executeHandler({
-        controller,
-        handler,
-        args,
-        request,
-        match,
+    try {
+      await RequestContext.run(requestId, async () => {
+        const url = new URL(request.url ?? "/", "http://localhost");
+        const match = this.router.match(request.method ?? "GET", url.pathname);
+        if (!match) {
+          throw new NotFoundError(
+            `Route ${request.method ?? "GET"} ${url.pathname} not found`,
+          );
+        }
+
+        await this.runMiddlewares(request, response, async () => {
+          for (const guard of this.guards) {
+            if (!(await guard.canActivate(request))) throw new ForbiddenError();
+          }
+
+          const controller = this.router.container.resolve(
+            match.route.controller,
+          ) as Record<string, (...values: unknown[]) => unknown>;
+          const handler = controller[match.route.handlerName];
+          const result = await this.runInterceptors(request, async () => {
+            const body = await this.readJsonBody(request);
+            const args = this.buildArguments(match, url, body);
+            return handler.apply(controller, args);
+          });
+
+          if (!response.writableEnded) {
+            this.json(response, match.route.method === "POST" ? 201 : 200, result);
+          }
+        });
       });
-      this.json(response, match.route.method === "POST" ? 201 : 200, result);
     } catch (error) {
-      if (error instanceof ValidationException) {
-        return this.json(response, 400, { errors: error.errors });
-      }
-      if (error instanceof SyntaxError) {
-        return this.json(response, 400, { error: "Invalid JSON body" });
-      }
-      console.error(error);
-      this.json(response, 500, { error: "Internal server error" });
+      this.exceptionFilter.catch(error, response);
     }
+  }
+
+  private runMiddlewares(
+    request: IncomingMessage,
+    response: ServerResponse,
+    handler: () => Promise<void>,
+  ): Promise<void> {
+    return this.middlewares.reduceRight<() => Promise<void>>(
+      (next, middleware) => () => middleware.use(request, response, next),
+      handler,
+    )();
+  }
+
+  private runInterceptors(
+    request: IncomingMessage,
+    handler: () => Promise<unknown>,
+  ): Promise<unknown> {
+    return this.interceptors.reduceRight<() => Promise<unknown>>(
+      (next, interceptor) => () => interceptor.intercept(request, next),
+      handler,
+    )();
   }
 
   private buildArguments(
@@ -105,22 +158,13 @@ export class Dispatcher {
       }
       if (parameter.type === "body") {
         const dto = parameter.dto ?? parameterTypes[index];
-        args[index] = dto && dto !== Object
-          ? this.validationPipe.transform(body, dto as Constructor<object>)
-          : body;
+        args[index] =
+          dto && dto !== Object
+            ? this.validationPipe.transform(body, dto as Constructor<object>)
+            : body;
       }
     }
     return args;
-  }
-
-  private executeHandler(context: HandlerContext): Promise<unknown> {
-    const invoke = () =>
-      Promise.resolve(context.handler.apply(context.controller, context.args));
-    const pipeline = this.stages.reduceRight<() => Promise<unknown>>(
-      (next, stage) => () => stage(context, next),
-      invoke,
-    );
-    return pipeline();
   }
 
   private async readJsonBody(request: IncomingMessage): Promise<unknown> {
