@@ -1,4 +1,4 @@
-# mini-nest — Part 2: HTTP routing and validation
+# mini-nest — Part 3: complete request lifecycle
 
 Навчальна реалізація mini-Nest без HTTP-фреймворків: IoC-контейнер із першої
 частини створює контролери та сервіси, router читає декоратори маршрутів, а
@@ -11,9 +11,9 @@ npm ci
 npm test
 ```
 
-Шістнадцять тестів перевіряють IoC-контейнер, маршрути, `@Param`, `@Query`,
-`@Body`, DTO validation, HTTP 400/404 та створення controller dependencies
-саме контейнером.
+Понад двадцять тестів перевіряють IoC-контейнер, HTTP routing, точний порядок
+lifecycle, authorization, Zod validation, exception mapping та ізоляцію десяти
+одночасних request contexts.
 
 Запуск тестів у Docker-образі з ДЗ #5:
 
@@ -27,10 +27,11 @@ API та PostgreSQL, як і раніше, запускаються однією
 ```bash
 docker compose up -d --build
 curl http://localhost:3000/health
-curl http://localhost:3000/users
-curl http://localhost:3000/users/42
-curl 'http://localhost:3000/users?limit=1'
+curl -H 'Authorization: Bearer demo' http://localhost:3000/users
+curl -H 'Authorization: Bearer demo' http://localhost:3000/users/42
+curl -H 'Authorization: Bearer demo' 'http://localhost:3000/users?limit=1'
 curl -X POST http://localhost:3000/users \
+  -H 'Authorization: Bearer demo' \
   -H 'content-type: application/json' \
   -d '{"name":"Lin","email":"lin@example.com"}'
 ```
@@ -75,11 +76,53 @@ path parameters. Статичні сегменти сортуються пере
 `/users/special` не перехоплюється маршрутом `/users/:id`. Список URL у коді не
 підтримується вручну: джерелом маршрутів є metadata декораторів.
 
-Власні `@IsString()` та `@IsEmail()` записують правила DTO. `ValidationPipe`
-перетворює JSON body на екземпляр класу, копіює лише поля з validation rules,
-збирає помилки всіх полів і повертає їх як `[{ field, constraints }]` з HTTP
-400. Виклик handler-а винесений у composable execution pipeline — наступна
-частина зможе додати guards та interceptors через `dispatcher.use(stage)`.
+`CreateUserDto` містить Zod 4 schema. `ZodValidationPipe` запускається
+безпосередньо перед handler, перетворює перевірене тіло на екземпляр DTO та
+перетворює `error.issues` на `[{ field, constraints }]`. Zod object schema також
+відкидає невідомі поля на кшталт `isAdmin`.
+
+## Життєвий цикл запиту
+
+```text
+Request
+  │
+  ▼
+Middleware
+  │
+  ▼
+Guard ── false ──► 403
+  │ true
+  ▼
+Interceptor (before)
+  │
+  ▼
+Zod Pipe ──► Handler
+  │             │
+  └─────────────┘
+        ▼
+Interceptor (after)
+        │
+        ▼
+JSON Response
+
+Будь-яка помилка з усього ланцюга ──► Exception Filter
+```
+
+Guard відповідає лише на питання, чи дозволено продовжувати запит, і працює до
+валідації. Interceptor обгортає pipe та handler через `next()`, тому бачить як
+вхід, так і результат або помилку після виконання. `ExceptionFilter` стоїть у
+найзовнішньому `try/catch`: `NotFoundError` стає 404, `ValidationError` — 400,
+а невідома помилка — безпечним 500 без stack trace у відповіді.
+
+## Чому AsyncLocalStorage, а не глобальна змінна
+
+Поки один HTTP-запит очікує `await`, event loop починає обробляти інший. Звичайна
+глобальна змінна в цей момент була б перезаписана чужим request id, і логи або
+відповіді змішалися б. `AsyncLocalStorage` прив'язує окреме сховище до
+асинхронного ланцюга кожного запиту. Dispatcher обгортає весь lifecycle у
+`RequestContext.run()`, тому repository на два рівні нижче handler-а читає той
+самий id без додавання параметра до сигнатур методів. Значення також повертається
+клієнту в заголовку `X-Request-Id`.
 
 ## Docker
 

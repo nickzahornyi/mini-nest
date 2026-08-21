@@ -53,11 +53,13 @@ describe("HTTP dispatcher", () => {
   const container = new Container();
   const router = new Router(container).registerControllers([TestUsersController]);
   const executionEvents: string[] = [];
-  const dispatcher = new Dispatcher(router).use(async (_context, next) => {
-    executionEvents.push("before");
-    const result = await next();
-    executionEvents.push("after");
-    return result;
+  const dispatcher = new Dispatcher(router).useInterceptor({
+    async intercept(_request, next) {
+      executionEvents.push("before");
+      const result = await next();
+      executionEvents.push("after");
+      return result;
+    },
   });
   let server: Server;
   let baseUrl: string;
@@ -162,6 +164,8 @@ describe("HTTP dispatcher", () => {
   it("returns JSON 404 for an unknown route", async () => {
     const response = await fetch(`${baseUrl}/missing`);
     assert.equal(response.status, 404);
-    assert.deepEqual(await response.json(), { error: "Not found" });
+    assert.deepEqual(await response.json(), {
+      error: "Route GET /missing not found",
+    });
   });
 });
